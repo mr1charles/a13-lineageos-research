@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Galaxy A13 LineageOS Port</title>
+<meta name="description" content="Research notes: porting LineageOS 23.2 (Android 16) onto a Samsung Galaxy A13 (SM-A135M) as an emulation handheld.">
+<style>
+:root{--bg:#fff;--fg:#1c1e21;--mut:#5b6068;--acc:#2f5fd0;--card:#f4f6fa;--bd:#dde1e8}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8ec;--mut:#9aa1ab;--acc:#7ea2ff;--card:#1d2026;--bd:#2b2f37}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:2rem;margin:.2em 0}h2{margin-top:2em;border-bottom:1px solid var(--bd);padding-bottom:.2em}
+.lead{color:var(--mut)}code{background:var(--card);padding:.1em .35em;border-radius:4px;font-size:.92em}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px 16px;margin:12px 0}
+a{color:var(--acc)}li{margin:.35em 0}
+</style></head><body><main>
+<h1>Porting LineageOS 23.2 to the Galaxy A13</h1>
+<p class="lead">Research notes from turning a Samsung Galaxy A13 (SM-A135M, Exynos 850) into an Android 16 retro-emulation handheld. Written as a log of what worked, what broke, and why.</p>
+
+<div class="card"><b>Result.</b> Official LineageOS 23.2 system images (built for the Galaxy A21s) boot on the A13 on top of the stock-derived A13 vendor partition, with a patched kernel and adjusted SELinux policy. Emulation (RetroArch, PPSSPP, melonDS) runs with on-screen controls.</div>
+
+<h2>Approach</h2>
+<ul>
+<li>Back up every original partition first (super, boot, recovery, dtbo, vbmeta, radio).</li>
+<li>Flash via TWRP: <code>adb push</code>/<code>dd</code> into <code>/dev/block/mapper/vendor|system</code> and <code>/dev/block/by-name/boot</code>, verifying checksums after each write.</li>
+<li>Keep the A13 vendor image, replace the system side with the A21s LineageOS build (same SoC family).</li>
+</ul>
+
+<h2>Problems and fixes</h2>
+<h3>SELinux policy failed to compile</h3>
+<p>The vendor <code>sepolicy.cil</code> contained 81 rules from a different OS build that made <code>secilc</code> abort at boot. Removing those rules lets the policy compile; the system runs permissive while the policy is reworked.</p>
+<h3>Plugging in at power-on boots charger mode</h3>
+<p>A cable present at boot (or after <code>reboot -p</code>) starts Samsung's offline-charging mode (<code>androidboot.mode=charger</code>). Fixes: make the init <code>on charger</code> trigger run <code>late-init</code>; binary-patch one instruction in the kernel (<code>ldrb w8,[x21,#0xc50]</code> to <code>mov w8,wzr</code>) so the Himax touch driver loads in low-power mode; disable the vendor health charger class.</p>
+<h3>Force-restart always lands in recovery</h3>
+<p>The kernel carries a Samsung <code>hard_reset_hook</code>: holding Volume Down + Power for about 7 to 10 seconds triggers a deliberate <code>BUG()</code>, and any panic is redirected to recovery. That is why a forced restart ends in TWRP.</p>
+<h3>USB gadget switching</h3>
+<p>The USB gadget HAL cannot switch modes, so adb over USB works only because an early vendor service binds the FunctionFS adb gadget at boot. Wireless debugging works but the Wi-Fi link drops after a few minutes.</p>
+<h3>Encrypted /data</h3>
+<p>TWRP cannot read metadata-encrypted <code>/data</code>. First boot needs one <code>twrp format data</code>; wiping with blank ext4 images breaks <code>vold</code>.</p>
+<h3>RetroArch config unreadable</h3>
+<p>On Android 16, FUSE rejects access to the app-private external directory, so RetroArch never found its config and the touch overlay never appeared. Placing the config and overlays under the app's data directory fixed it.</p>
+
+<h2>Hardware: clamshell handheld</h2>
+<p>A parametric OpenSCAD clamshell case (phone in the lid, controls in the base) and a 2-layer carrier PCB for an RP2040 and ADS1115 stick reader were designed for the build. The case and PCB are designed but not yet fabricated or tested on hardware.</p>
+
+<h2>Limits</h2>
+<ul><li>Exynos 850 is too slow for GameCube-class emulation.</li><li>SELinux is permissive; a proper policy is unfinished.</li><li>Kernel patch is a binary edit at a fixed offset and only valid for this exact kernel build.</li></ul>
+
+<h2>Related</h2>
+<ul><li><a href="https://github.com/mr1charles/new-os-">new-os-</a>: separate desktop-shell project.</li></ul>
+<p class="lead">Disk images are not published: they contain proprietary vendor code and device-identifying partitions.</p>
+</main></body></html>
